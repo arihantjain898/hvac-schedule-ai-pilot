@@ -10,15 +10,17 @@ import {
   BarChart3,
   HelpCircle,
   Calculator,
+  Mic,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 interface SidebarProps {
   className?: string;
   onSmartScheduleClick: () => void;
+  onVoiceAssistantClick?: () => void;
 }
 
-export default function Sidebar({ className, onSmartScheduleClick }: SidebarProps) {
+export default function Sidebar({ className, onSmartScheduleClick, onVoiceAssistantClick }: SidebarProps) {
   return (
     <div
       className={cn(
@@ -68,6 +70,15 @@ export default function Sidebar({ className, onSmartScheduleClick }: SidebarProp
         >
           <Calculator className="mr-2 h-5 w-5" />
           Smart Scheduling
+        </Button>
+        
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+          onClick={onVoiceAssistantClick}
+        >
+          <Mic className="mr-2 h-5 w-5" />
+          Voice Assistant
         </Button>
         
         <Button variant="ghost" className="w-full justify-start text-muted-foreground" disabled>

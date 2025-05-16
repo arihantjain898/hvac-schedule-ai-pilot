@@ -21,6 +21,7 @@ const Index = () => {
   const [currentAppointment, setCurrentAppointment] = useState<Appointment | undefined>(undefined);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
   const [showSmartScheduler, setShowSmartScheduler] = useState(false);
+  const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
   
   const handleNewAppointment = () => {
     setCurrentAppointment(undefined);
@@ -53,7 +54,12 @@ const Index = () => {
       ));
     } else {
       // Add new appointment
-      setAppointments([...appointments, appointmentData as Appointment]);
+      const newAppointmentId = `appt-${Date.now()}`;
+      setAppointments([...appointments, {
+        id: newAppointmentId,
+        ...appointmentData,
+        status: 'scheduled'
+      } as Appointment]);
     }
     
     setShowAppointmentForm(false);
@@ -61,6 +67,10 @@ const Index = () => {
   
   const handleSmartScheduleClick = () => {
     setShowSmartScheduler(true);
+  };
+  
+  const handleVoiceAssistantClick = () => {
+    setShowVoiceAssistant(true);
   };
   
   const handleSmartScheduleSubmit = (appointmentData: Partial<Appointment>) => {
@@ -77,6 +87,10 @@ const Index = () => {
     
     setShowSmartScheduler(false);
     setShowAppointmentForm(true);
+  };
+  
+  const handleUpdateAppointments = (updatedAppointments: Appointment[]) => {
+    setAppointments(updatedAppointments);
   };
   
   const getStatusColor = (status: string) => {
@@ -96,7 +110,10 @@ const Index = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <Sidebar onSmartScheduleClick={handleSmartScheduleClick} />
+      <Sidebar 
+        onSmartScheduleClick={handleSmartScheduleClick}
+        onVoiceAssistantClick={handleVoiceAssistantClick}
+      />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header appointments={appointments} />
@@ -118,7 +135,19 @@ const Index = () => {
         <DialogContent className="max-w-2xl">
           <SmartScheduler 
             appointments={appointments} 
-            onSchedule={handleSmartScheduleSubmit} 
+            onSchedule={handleSmartScheduleSubmit}
+            onUpdateAppointments={handleUpdateAppointments}
+          />
+        </DialogContent>
+      </Dialog>
+      
+      {/* Voice Assistant Dialog */}
+      <Dialog open={showVoiceAssistant} onOpenChange={setShowVoiceAssistant}>
+        <DialogContent className="max-w-2xl">
+          <SmartScheduler
+            appointments={appointments}
+            onSchedule={handleSmartScheduleSubmit}
+            onUpdateAppointments={handleUpdateAppointments}
           />
         </DialogContent>
       </Dialog>

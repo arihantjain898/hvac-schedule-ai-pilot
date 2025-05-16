@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from "react";
 import { format, addDays, isSameDay } from "date-fns";
-import { Calculator, Calendar as CalendarIcon, CheckCircle2 } from "lucide-react";
+import { Calculator, Calendar as CalendarIcon, CheckCircle2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +12,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
+import VoiceInterface from "@/components/VoiceInterface/VoiceInterface";
+import { parseSchedulingRequest, executeReschedulingAction } from "@/lib/nlpScheduler";
 
 import { cn } from "@/lib/utils";
 import { getAITechnicianRecommendations } from "@/lib/aiRecommendations";
@@ -21,9 +23,10 @@ import { technicians } from "@/lib/mockData";
 interface SmartSchedulerProps {
   appointments: Appointment[];
   onSchedule: (appointmentData: Partial<Appointment>) => void;
+  onUpdateAppointments?: (appointments: Appointment[]) => void;
 }
 
-export default function SmartScheduler({ appointments, onSchedule }: SmartSchedulerProps) {
+export default function SmartScheduler({ appointments, onSchedule, onUpdateAppointments }: SmartSchedulerProps) {
   const [serviceType, setServiceType] = useState<ServiceType>("maintenance");
   const [priority, setPriority] = useState<"low" | "normal" | "high" | "emergency">("normal");
   const [date, setDate] = useState<Date | undefined>(new Date());
@@ -32,6 +35,10 @@ export default function SmartScheduler({ appointments, onSchedule }: SmartSchedu
     dates: { date: Date; score: number }[];
     technicians: { tech: Technician; score: number }[];
   } | null>(null);
+  const [activeTab, setActiveTab] = useState("options");
+  const [voiceMessage, setVoiceMessage] = useState("");
+  const [voiceResponse, setVoiceResponse] = useState("");
+  const [lastTranscript, setLastTranscript] = useState("");
   
   // Function to get optimal scheduling suggestions
   const generateSmartSuggestions = () => {
@@ -119,6 +126,23 @@ export default function SmartScheduler({ appointments, onSchedule }: SmartSchedu
     toast.success("Smart appointment scheduled!");
   };
   
+  const handleVoiceInput = (transcript: string) => {
+    setLastTranscript(transcript);
+    setVoiceMessage(transcript);
+    
+    // Process the voice command
+    const action = parseSchedulingRequest(transcript, appointments);
+    const { updatedAppointments, message } = executeReschedulingAction(action, appointments);
+    
+    setVoiceResponse(message);
+    
+    // Check if appointments were updated
+    if (JSON.stringify(updatedAppointments) !== JSON.stringify(appointments) && onUpdateAppointments) {
+      onUpdateAppointments(updatedAppointments);
+      toast.success("Schedule updated based on voice command");
+    }
+  };
+  
   return (
     <div className="w-full">
       <CardHeader>
@@ -128,10 +152,11 @@ export default function SmartScheduler({ appointments, onSchedule }: SmartSchedu
         </CardDescription>
       </CardHeader>
       
-      <Tabs defaultValue="options">
-        <TabsList className="grid w-full grid-cols-2">
+      <Tabs defaultValue="options" value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="options">Scheduling Options</TabsTrigger>
           <TabsTrigger value="suggestions">AI Suggestions</TabsTrigger>
+          <TabsTrigger value="voice">Voice Assistant</TabsTrigger>
         </TabsList>
         
         <TabsContent value="options" className="space-y-4 pt-4">
@@ -241,7 +266,10 @@ export default function SmartScheduler({ appointments, onSchedule }: SmartSchedu
               
               <Button 
                 className="w-full mt-2" 
-                onClick={generateSmartSuggestions}
+                onClick={() => {
+                  generateSmartSuggestions();
+                  setActiveTab("suggestions");
+                }}
               >
                 Generate AI Suggestions
               </Button>
@@ -310,6 +338,51 @@ export default function SmartScheduler({ appointments, onSchedule }: SmartSchedu
               </p>
             </div>
           )}
+        </TabsContent>
+        
+        <TabsContent value="voice" className="pt-4 space-y-6">
+          <div className="bg-muted/50 p-4 rounded-md">
+            <h3 className="text-lg font-medium mb-2">Voice Assistant</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Use your voice to manage appointments. Try saying:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-muted-foreground mb-4">
+              <div className="bg-background p-2 rounded">
+                "Move Sarah Williams to Monday"
+              </div>
+              <div className="bg-background p-2 rounded">
+                "Push all appointments back by 1 day"
+              </div>
+              <div className="bg-background p-2 rounded">
+                "Cancel John Smith's appointment"
+              </div>
+              <div className="bg-background p-2 rounded">
+                "Show David's schedule"
+              </div>
+            </div>
+            
+            <div className="flex flex-col space-y-4">
+              <div className="flex gap-2 items-start">
+                <div className="bg-primary/10 p-3 rounded-md flex-1">
+                  <p className="text-sm">{voiceMessage || "Use the voice button to speak a command..."}</p>
+                </div>
+                <VoiceInterface
+                  onTranscript={handleVoiceInput}
+                  className="mt-0"
+                />
+              </div>
+              
+              {voiceResponse && (
+                <div className="bg-primary/5 border border-primary/20 p-3 rounded-md">
+                  <div className="flex items-center gap-2 mb-1">
+                    <MessageSquare className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-medium">Assistant Response</span>
+                  </div>
+                  <p className="text-sm">{voiceResponse}</p>
+                </div>
+              )}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
       
