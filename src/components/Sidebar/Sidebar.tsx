@@ -9,14 +9,16 @@ import {
   Settings,
   BarChart3,
   HelpCircle,
+  Calculator,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 interface SidebarProps {
   className?: string;
+  onSmartScheduleClick: () => void;
 }
 
-export default function Sidebar({ className }: SidebarProps) {
+export default function Sidebar({ className, onSmartScheduleClick }: SidebarProps) {
   return (
     <div
       className={cn(
@@ -59,19 +61,12 @@ export default function Sidebar({ className }: SidebarProps) {
           AI TOOLS
         </h2>
         
-        <Button variant="ghost" className="w-full justify-start text-muted-foreground" disabled>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="mr-2 h-5 w-5"
-          >
-            <path d="M12 2a8 8 0 0 0-8 8v12l10-5 10 5V10a8 8 0 0 0-8-8Z" />
-          </svg>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+          onClick={onSmartScheduleClick}
+        >
+          <Calculator className="mr-2 h-5 w-5" />
           Smart Scheduling
         </Button>
         
@@ -86,12 +81,9 @@ export default function Sidebar({ className }: SidebarProps) {
             strokeLinejoin="round"
             className="mr-2 h-5 w-5"
           >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 2a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
-            <path d="M12 8c-1.333 1.667-1.333 4.333 0 6" />
-            <path d="M12 16c1.333-1.667 1.333-4.333 0-6" />
+            <path d="M12 2a8 8 0 0 0-8 8v12l10-5 10 5V10a8 8 0 0 0-8-8Z" />
           </svg>
-          Service Optimization
+          Smart Optimization
         </Button>
       </div>
 

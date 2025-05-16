@@ -7,6 +7,7 @@ import Sidebar from "@/components/Sidebar/Sidebar";
 import Header from "@/components/Header/Header";
 import CalendarView from "@/components/Calendar/CalendarView";
 import AppointmentForm from "@/components/Calendar/AppointmentForm";
+import SmartScheduler from "@/components/SmartScheduling/SmartScheduler";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Appointment, CalendarViewMode } from "@/types";
 import { appointments as initialAppointments } from "@/lib/mockData";
@@ -19,6 +20,7 @@ const Index = () => {
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const [currentAppointment, setCurrentAppointment] = useState<Appointment | undefined>(undefined);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
+  const [showSmartScheduler, setShowSmartScheduler] = useState(false);
   
   const handleNewAppointment = () => {
     setCurrentAppointment(undefined);
@@ -57,6 +59,26 @@ const Index = () => {
     setShowAppointmentForm(false);
   };
   
+  const handleSmartScheduleClick = () => {
+    setShowSmartScheduler(true);
+  };
+  
+  const handleSmartScheduleSubmit = (appointmentData: Partial<Appointment>) => {
+    // Generate a unique ID for the new appointment
+    const newAppointmentId = `appt-${Date.now()}`;
+    
+    // Since Smart Scheduler doesn't collect all required fields,
+    // we need to redirect to the regular appointment form for completion
+    setCurrentAppointment({
+      ...appointmentData,
+      id: newAppointmentId,
+      status: 'scheduled'
+    } as Appointment);
+    
+    setShowSmartScheduler(false);
+    setShowAppointmentForm(true);
+  };
+  
   const getStatusColor = (status: string) => {
     switch (status) {
       case "scheduled":
@@ -74,7 +96,7 @@ const Index = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <Sidebar />
+      <Sidebar onSmartScheduleClick={handleSmartScheduleClick} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header appointments={appointments} />
@@ -90,6 +112,16 @@ const Index = () => {
           />
         </div>
       </div>
+      
+      {/* Smart Scheduler Dialog */}
+      <Dialog open={showSmartScheduler} onOpenChange={setShowSmartScheduler}>
+        <DialogContent className="max-w-2xl">
+          <SmartScheduler 
+            appointments={appointments} 
+            onSchedule={handleSmartScheduleSubmit} 
+          />
+        </DialogContent>
+      </Dialog>
       
       {/* Appointment Form Dialog */}
       <Dialog open={showAppointmentForm} onOpenChange={setShowAppointmentForm}>

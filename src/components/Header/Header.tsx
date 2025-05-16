@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { analyzeScheduleEfficiency } from "@/lib/aiRecommendations";
 import { Appointment } from "@/types";
+import { cn } from "@/lib/utils";
 
 interface HeaderProps {
   appointments: Appointment[];
