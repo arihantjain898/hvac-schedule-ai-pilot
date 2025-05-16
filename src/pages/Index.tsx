@@ -8,7 +8,13 @@ import Header from "@/components/Header/Header";
 import CalendarView from "@/components/Calendar/CalendarView";
 import AppointmentForm from "@/components/Calendar/AppointmentForm";
 import SmartScheduler from "@/components/SmartScheduling/SmartScheduler";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { 
+  Dialog, 
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Appointment, CalendarViewMode } from "@/types";
 import { appointments as initialAppointments } from "@/lib/mockData";
 import { cn } from "@/lib/utils";
@@ -133,6 +139,9 @@ const Index = () => {
       {/* Smart Scheduler Dialog */}
       <Dialog open={showSmartScheduler} onOpenChange={setShowSmartScheduler}>
         <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Smart Scheduler</DialogTitle>
+          </DialogHeader>
           <SmartScheduler 
             appointments={appointments} 
             onSchedule={handleSmartScheduleSubmit}
@@ -144,6 +153,12 @@ const Index = () => {
       {/* Voice Assistant Dialog */}
       <Dialog open={showVoiceAssistant} onOpenChange={setShowVoiceAssistant}>
         <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Voice Assistant</DialogTitle>
+            <DialogDescription>
+              Use voice commands to manage your appointments
+            </DialogDescription>
+          </DialogHeader>
           <SmartScheduler
             appointments={appointments}
             onSchedule={handleSmartScheduleSubmit}
@@ -155,6 +170,9 @@ const Index = () => {
       {/* Appointment Form Dialog */}
       <Dialog open={showAppointmentForm} onOpenChange={setShowAppointmentForm}>
         <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{currentAppointment ? 'Edit Appointment' : 'New Appointment'}</DialogTitle>
+          </DialogHeader>
           <AppointmentForm 
             existingAppointment={currentAppointment}
             onSubmit={handleAppointmentSubmit}
@@ -166,6 +184,9 @@ const Index = () => {
       {/* Appointment Details Dialog */}
       <Dialog open={showAppointmentDetails} onOpenChange={setShowAppointmentDetails}>
         <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Appointment Details</DialogTitle>
+          </DialogHeader>
           {currentAppointment && (
             <div className="space-y-4">
               <div className="flex justify-between items-start">

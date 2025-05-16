@@ -21,14 +21,14 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
   // Initialize speech recognition
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
       
-      if (!SpeechRecognition) {
+      if (!SpeechRecognitionAPI) {
         toast.error("Speech recognition is not supported in this browser.");
         return;
       }
 
-      const recognitionInstance = new SpeechRecognition();
+      const recognitionInstance = new SpeechRecognitionAPI();
       recognitionInstance.continuous = true;
       recognitionInstance.interimResults = true;
       recognitionInstance.lang = 'en-US';
@@ -41,6 +41,7 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
 
         // Only send completed phrases (when isFinal is true)
         if (event.results[event.results.length - 1].isFinal) {
+          console.log("Voice transcript:", transcript);
           onTranscript(transcript);
         }
       };
@@ -49,12 +50,15 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
         console.error('Speech recognition error', event.error);
         if (event.error === 'not-allowed') {
           toast.error("Microphone access denied. Please enable microphone permissions.");
+        } else {
+          toast.error(`Speech recognition error: ${event.error}`);
         }
         setIsListening(false);
       };
 
       recognitionInstance.onend = () => {
         setIsListening(false);
+        console.log("Speech recognition ended");
       };
 
       setRecognition(recognitionInstance);
@@ -87,7 +91,7 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
         setIsListening(false);
       }
     }
-  }, [externalIsListening, recognition]);
+  }, [externalIsListening, recognition, isListening]);
 
   const toggleListening = useCallback(() => {
     if (!recognition) return;

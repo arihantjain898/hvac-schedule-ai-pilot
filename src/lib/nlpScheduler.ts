@@ -1,9 +1,10 @@
 
-import { format, parse, addDays, subDays } from 'date-fns';
-import { Appointment } from '@/types';
+import { format, parse, addDays, subDays, nextMonday, nextTuesday, nextWednesday, nextThursday, nextFriday, nextSaturday, nextSunday } from 'date-fns';
+import { Appointment, ServiceType } from '@/types';
+import { technicians } from '@/lib/mockData';
 
 interface ReschedulingAction {
-  action: 'reschedule' | 'cancel' | 'info' | 'unknown';
+  action: 'reschedule' | 'cancel' | 'info' | 'create' | 'unknown';
   customerId?: string;
   customerName?: string;
   technicianId?: string;
@@ -13,11 +14,30 @@ interface ReschedulingAction {
   toDate?: string;
   affectedAppointments?: string[];
   shiftDays?: number;
+  serviceType?: ServiceType;
+  customerAddress?: string;
+  customerPhone?: string;
+  serviceDescription?: string;
   original?: string;
 }
 
+// Helper function to get the next occurrence of a day
+const getNextDay = (dayName: string): Date => {
+  const days = {
+    'monday': nextMonday,
+    'tuesday': nextTuesday, 
+    'wednesday': nextWednesday,
+    'thursday': nextThursday,
+    'friday': nextFriday,
+    'saturday': nextSaturday,
+    'sunday': nextSunday
+  };
+  
+  const today = new Date();
+  return days[dayName as keyof typeof days](today);
+};
+
 // This is a simplified NLP parser that looks for specific patterns
-// In a real app, you'd use a more sophisticated NLP system or service
 export const parseSchedulingRequest = (
   input: string, 
   appointments: Appointment[]
@@ -28,8 +48,57 @@ export const parseSchedulingRequest = (
     original: input
   };
   
+  // Create a new appointment
+  if (lowerInput.includes('create') || lowerInput.includes('add') || lowerInput.includes('schedule') || lowerInput.includes('new')) {
+    if (lowerInput.includes('appointment') || lowerInput.includes('job') || lowerInput.includes('service') || lowerInput.includes('visit')) {
+      action.action = 'create';
+      
+      // Try to identify service type
+      if (lowerInput.includes('install') || lowerInput.includes('installation')) {
+        action.serviceType = 'installation';
+      } else if (lowerInput.includes('repair')) {
+        action.serviceType = 'repair';
+      } else if (lowerInput.includes('maintenance')) {
+        action.serviceType = 'maintenance';
+      } else if (lowerInput.includes('inspect') || lowerInput.includes('inspection')) {
+        action.serviceType = 'inspection';
+      }
+      
+      // Try to extract customer name
+      const nameRegex = /(for|with|customer)\s+([a-z]+\s+[a-z]+)/i;
+      const nameMatch = lowerInput.match(nameRegex);
+      if (nameMatch && nameMatch[2]) {
+        action.customerName = nameMatch[2].trim();
+      }
+      
+      // Try to extract date (e.g., "on Monday", "for next Tuesday")
+      const dayRegex = /(on|for|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i;
+      const dayMatch = lowerInput.match(dayRegex);
+      if (dayMatch && dayMatch[2]) {
+        const targetDate = getNextDay(dayMatch[2].toLowerCase());
+        action.toDate = format(targetDate, 'yyyy-MM-dd');
+      }
+      
+      // Try to extract description
+      const descRegex = /(for|to)\s+(.*?)\s+(on|at|with|tomorrow|next)/i;
+      const descMatch = lowerInput.match(descRegex);
+      if (descMatch && descMatch[2]) {
+        action.serviceDescription = descMatch[2].trim();
+      }
+      
+      // Extract any address mention
+      const addressRegex = /at\s+([\w\s\d,\.]+)(?:,|\s|$)/i;
+      const addressMatch = lowerInput.match(addressRegex);
+      if (addressMatch && addressMatch[1]) {
+        action.customerAddress = addressMatch[1].trim();
+      }
+      
+      return action;
+    }
+  }
+  
   // Extract customer name (look for patterns like "move [name]" or "reschedule [name]")
-  const moveCustomerRegex = /(move|reschedule|change)\s+([a-z]+\s+[a-z]+)(\s+to\s+|'s\s+appointment|\s+appointment)/i;
+  const moveCustomerRegex = /(move|reschedule|change|shift)\s+([a-z]+\s+[a-z]+)(\s+to\s+|'s\s+appointment|\s+appointment)/i;
   const customerMatch = lowerInput.match(moveCustomerRegex);
   
   if (customerMatch && customerMatch[2]) {
@@ -54,16 +123,7 @@ export const parseSchedulingRequest = (
     
     if (dayMatch && dayMatch[1]) {
       const targetDay = dayMatch[1].toLowerCase();
-      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-      const today = new Date();
-      const todayDayIndex = today.getDay();
-      const targetDayIndex = days.indexOf(targetDay);
-      
-      // Calculate days to add
-      let daysToAdd = targetDayIndex - todayDayIndex;
-      if (daysToAdd <= 0) daysToAdd += 7; // Go to next week if the day has already passed
-      
-      const targetDate = addDays(today, daysToAdd);
+      const targetDate = getNextDay(targetDay);
       action.toDate = format(targetDate, 'yyyy-MM-dd');
     }
   }
@@ -83,7 +143,8 @@ export const parseSchedulingRequest = (
     // Check if this applies to a specific appointment or customer
     if (!action.customerName) {
       // Check if there's a mention of "other" appointments
-      if (lowerInput.includes('other appointment') || lowerInput.includes('all appointment')) {
+      if (lowerInput.includes('other appointment') || lowerInput.includes('all appointment') || 
+          lowerInput.includes('other job') || lowerInput.includes('all job')) {
         // This means shift all appointments without specific customer mentions
         action.affectedAppointments = appointments
           .filter(appt => appt.date >= format(new Date(), 'yyyy-MM-dd'))
@@ -93,11 +154,12 @@ export const parseSchedulingRequest = (
   }
   
   // Handle cancellation requests
-  if (lowerInput.includes('cancel') && (lowerInput.includes('appointment') || lowerInput.includes('meeting'))) {
+  if (lowerInput.includes('cancel') && (lowerInput.includes('appointment') || lowerInput.includes('meeting') || 
+      lowerInput.includes('job') || lowerInput.includes('visit'))) {
     action.action = 'cancel';
     
     // Try to find customer name in cancellation request
-    const cancelCustomerRegex = /cancel\s+([a-z]+\s+[a-z]+)('s)?\s+appointment/i;
+    const cancelCustomerRegex = /cancel\s+([a-z]+\s+[a-z]+)('s)?\s+(appointment|job|service|visit)/i;
     const cancelMatch = lowerInput.match(cancelCustomerRegex);
     
     if (cancelMatch && cancelMatch[1]) {
@@ -116,11 +178,11 @@ export const parseSchedulingRequest = (
   
   // Handle information requests
   if ((lowerInput.includes('show') || lowerInput.includes('tell me') || lowerInput.includes('what is')) && 
-      (lowerInput.includes('schedule') || lowerInput.includes('appointment'))) {
+      (lowerInput.includes('schedule') || lowerInput.includes('appointment') || lowerInput.includes('job'))) {
     action.action = 'info';
     
     // Try to extract a technician name
-    const technicianRegex = /(show|what|tell me about)\s+([a-z]+)('s)?\s+(schedule|appointments)/i;
+    const technicianRegex = /(show|what|tell me about)\s+([a-z]+)('s)?\s+(schedule|appointments|jobs)/i;
     const techMatch = lowerInput.match(technicianRegex);
     
     if (techMatch && techMatch[2]) {
@@ -141,7 +203,59 @@ export const executeReschedulingAction = (
   const updatedAppointments = [...appointments];
   let message = "I couldn't understand that request. Could you please try again?";
   
-  if (action.action === 'reschedule') {
+  // Create a new appointment via voice
+  if (action.action === 'create') {
+    const newAppointmentId = `appt-${Date.now()}`;
+    const date = action.toDate || format(new Date(), 'yyyy-MM-dd');
+    const serviceType = action.serviceType || 'maintenance';
+    
+    // Select a random technician if none specified
+    const availableTechs = technicians.filter(tech => 
+      tech.specialties.includes(serviceType) || 
+      (serviceType === 'maintenance' && tech.level !== 'apprentice')
+    );
+    const selectedTech = availableTechs.length > 0 ? 
+      availableTechs[Math.floor(Math.random() * availableTechs.length)] : 
+      technicians[0];
+    
+    // Create customer info
+    let customerName = action.customerName || "New Customer";
+    
+    // Create a new appointment
+    const newAppointment: Appointment = {
+      id: newAppointmentId,
+      customerId: `cust-${Date.now()}`,
+      customer: {
+        id: `cust-${Date.now()}`,
+        name: customerName,
+        address: action.customerAddress || "123 Main St",
+        phone: "555-123-4567",
+        email: `${customerName.toLowerCase().replace(/\s/g, '.')}@example.com`,
+      },
+      technicianId: selectedTech.id,
+      technician: selectedTech,
+      serviceType: serviceType,
+      serviceDescription: action.serviceDescription || `${serviceType} service`,
+      priority: "normal",
+      date: date,
+      timeSlot: "morning",
+      estimatedDuration: 
+        serviceType === 'installation' ? 180 : 
+        serviceType === 'repair' ? 120 : 
+        serviceType === 'maintenance' ? 60 : 45,
+      status: 'scheduled',
+      notes: "Created via voice command"
+    };
+    
+    updatedAppointments.push(newAppointment);
+    
+    message = `Created a new ${serviceType} appointment ${
+      action.customerName ? `for ${action.customerName}` : ''
+    } on ${format(new Date(date), 'EEEE, MMMM d')}`;
+  }
+  
+  // Handle reschedule operations
+  else if (action.action === 'reschedule') {
     if (action.appointmentId && action.toDate) {
       // Reschedule a specific appointment to a specific date
       const appointmentIndex = updatedAppointments.findIndex(appt => appt.id === action.appointmentId);
@@ -153,7 +267,7 @@ export const executeReschedulingAction = (
           date: action.toDate
         };
         
-        message = `Rescheduled ${updatedAppointments[appointmentIndex].customer.name}'s appointment from ${format(new Date(oldDate), 'MMM d')} to ${format(new Date(action.toDate), 'MMM d')}`;
+        message = `Rescheduled ${updatedAppointments[appointmentIndex].customer.name}'s appointment from ${format(new Date(oldDate), 'MMM d')} to ${format(new Date(action.toDate), 'EEEE, MMM d')}`;
       }
     } else if (action.shiftDays && action.customerName) {
       // Shift a specific customer's appointment by days

@@ -17,7 +17,7 @@ import { Separator } from "@/components/ui/separator";
 interface SidebarProps {
   className?: string;
   onSmartScheduleClick: () => void;
-  onVoiceAssistantClick?: () => void;
+  onVoiceAssistantClick: () => void;
 }
 
 export default function Sidebar({ className, onSmartScheduleClick, onVoiceAssistantClick }: SidebarProps) {

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from "react";
 import { format, addDays, isSameDay } from "date-fns";
-import { Calculator, Calendar as CalendarIcon, CheckCircle2, MessageSquare } from "lucide-react";
+import { Calculator, Calendar as CalendarIcon, CheckCircle2, MessageSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -39,6 +39,7 @@ export default function SmartScheduler({ appointments, onSchedule, onUpdateAppoi
   const [voiceMessage, setVoiceMessage] = useState("");
   const [voiceResponse, setVoiceResponse] = useState("");
   const [lastTranscript, setLastTranscript] = useState("");
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   
   // Function to get optimal scheduling suggestions
   const generateSmartSuggestions = () => {
@@ -127,19 +128,37 @@ export default function SmartScheduler({ appointments, onSchedule, onUpdateAppoi
   };
   
   const handleVoiceInput = (transcript: string) => {
+    setIsProcessingVoice(true);
     setLastTranscript(transcript);
     setVoiceMessage(transcript);
     
-    // Process the voice command
-    const action = parseSchedulingRequest(transcript, appointments);
-    const { updatedAppointments, message } = executeReschedulingAction(action, appointments);
-    
-    setVoiceResponse(message);
-    
-    // Check if appointments were updated
-    if (JSON.stringify(updatedAppointments) !== JSON.stringify(appointments) && onUpdateAppointments) {
-      onUpdateAppointments(updatedAppointments);
-      toast.success("Schedule updated based on voice command");
+    try {
+      // Process the voice command
+      console.log("Processing voice command:", transcript);
+      const action = parseSchedulingRequest(transcript, appointments);
+      console.log("Parsed action:", action);
+      
+      const { updatedAppointments, message } = executeReschedulingAction(action, appointments);
+      
+      setVoiceResponse(message);
+      
+      // Check if appointments were updated
+      if (JSON.stringify(updatedAppointments) !== JSON.stringify(appointments) && onUpdateAppointments) {
+        onUpdateAppointments(updatedAppointments);
+        
+        if (action.action === 'create') {
+          toast.success("New appointment created via voice command");
+        } else if (action.action === 'reschedule') {
+          toast.success("Schedule updated based on voice command");
+        } else if (action.action === 'cancel') {
+          toast.warning("Appointment cancelled based on voice command");
+        }
+      }
+    } catch (error) {
+      console.error("Error processing voice command:", error);
+      setVoiceResponse("Sorry, I had trouble understanding that request. Could you try again?");
+    } finally {
+      setIsProcessingVoice(false);
     }
   };
   
@@ -354,10 +373,10 @@ export default function SmartScheduler({ appointments, onSchedule, onUpdateAppoi
                 "Push all appointments back by 1 day"
               </div>
               <div className="bg-background p-2 rounded">
-                "Cancel John Smith's appointment"
+                "Add new installation for John Smith on Friday"
               </div>
               <div className="bg-background p-2 rounded">
-                "Show David's schedule"
+                "Cancel John Smith's appointment"
               </div>
             </div>
             
@@ -379,6 +398,12 @@ export default function SmartScheduler({ appointments, onSchedule, onUpdateAppoi
                     <span className="text-xs font-medium">Assistant Response</span>
                   </div>
                   <p className="text-sm">{voiceResponse}</p>
+                </div>
+              )}
+              
+              {isProcessingVoice && (
+                <div className="flex justify-center">
+                  <div className="animate-spin h-5 w-5 border-2 border-blue-500 rounded-full border-t-transparent"></div>
                 </div>
               )}
             </div>
