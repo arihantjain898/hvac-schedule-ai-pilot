@@ -323,19 +323,19 @@ app.post('/', async (req, res) => {
             .info-box {
                 padding: 20px 15px;
             }
+            
+            /* Modified mobile styles to keep headers and values on same line */
             .data-table th, .data-table td {
-                display: block;
-                width: 100%;
-                box-sizing: border-box;
-                border-radius: 0;
+                display: table-cell;
+                padding: 8px 10px;
+                font-size: 12px;
             }
             .data-table th {
-                border-radius: 5px 5px 0 0;
+                width: 40%;
             }
-            .data-table td {
-                border-radius: 0 0 5px 5px;
-                border-top: none;
-                margin-bottom: 10px;
+            .data-table tr {
+                margin-bottom: 5px;
+                display: table-row;
             }
         }
     </style>
