@@ -2,7 +2,7 @@ const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { google } = require('googleapis');
 const express = require('express');
 const bodyParser = require('body-parser');
-const { format } = require('date-fns');
+const { format, parse, isValid } = require('date-fns');
 
 // Explicitly provide the project ID when creating the client
 const secretClient = new SecretManagerServiceClient({
@@ -12,69 +12,66 @@ const secretClient = new SecretManagerServiceClient({
 const app = express();
 app.use(bodyParser.json());
 
-// This can be the same sender as your other function
-const SENDER_EMAIL = process.env.SENDER_EMAIL || 'info@spacesquare.dev';
-const SENDER_NAME = 'Bläz Booking System'; // Or whatever you'd like the "From" name to be for users
+const SENDER_EMAIL = process.env.SENDER_EMAIL || 'info@spacesquare.dev'; // Use your alias here if desired
 
 async function getServiceAccountKey() {
   const [version] = await secretClient.accessSecretVersion({
-    name: 'projects/blaz-request-booth/secrets/SA_KEY/versions/latest' // Ensure this path is correct
+    name: 'projects/blaz-request-booth/secrets/SA_KEY/versions/latest'
   });
   return JSON.parse(version.payload.data.toString());
 }
 
-// Helper function to format date strings based on user input
-function formatEventDate(dateString) {
+// Helper function to format date if it's a valid date string
+function formatDateIfValid(dateString) {
   try {
-    // First check if we can parse the date
+    // Check if it's a valid date
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) {
-      return dateString; // Return original if parsing fails
+    if (!isNaN(date.getTime())) {
+      // Check if the year is mentioned in the original string
+      if (dateString.includes(date.getFullYear().toString())) {
+        return format(date, 'MMM dd, yyyy');
+      } else {
+        return format(date, 'MMM dd');
+      }
     }
-    
-    // Check if the original string includes a year
-    // This regex looks for a 4-digit year pattern in the string
-    const hasYear = /\b\d{4}\b/.test(dateString);
-    
-    // Format based on whether year was included
-    if (hasYear) {
-      return format(date, 'MMMM d, yyyy');
-    } else {
-      return format(date, 'MMMM d');
-    }
+    return dateString; // Return original if not valid
   } catch (error) {
-    console.log('Date formatting error:', error);
     return dateString; // Return original on error
   }
 }
 
 app.post('/', async (req, res) => {
-  if (!req.body || !req.body.message || !req.body.message.data) {
-    console.log('No Pub/Sub message data received for user confirmation.');
-    return res.status(204).send('No message data, but acknowledged.');
+  const pubsubMessage = req.body.message;
+  if (!pubsubMessage || !pubsubMessage.data) {
+    console.log('No Pub/Sub message data received.'); // Added logging for clarity
+    return res.status(204).send('No message data, but acknowledged.'); // Use 204 for no content, successful processing of no data
   }
 
-  const pubsubMessage = req.body.message;
   let bookingData;
   try {
     const raw = Buffer.from(pubsubMessage.data, 'base64').toString();
     bookingData = JSON.parse(raw);
-    console.log('Received booking data for user confirmation:', bookingData);
+    console.log('Received booking data for internal notification:', bookingData); // Added logging
   } catch (error) {
-    console.error('⚠️ Invalid JSON in Pub/Sub message for user confirmation:', error);
-    return res.status(200).send('Bad JSON, message acknowledged.');
+    console.error('⚠️ Invalid JSON in Pub/Sub message:', error);
+    return res.status(200).send('Bad JSON, message acknowledged.'); // Acknowledge bad data to prevent retries
   }
 
-  if (!bookingData || !bookingData.email) {
-    console.error('⚠️ Booking data is missing user email for confirmation.');
-    return res.status(200).send('Missing user email, message acknowledged.');
+  // --- Crucial: Ensure basic data for internal email ---
+  if (!bookingData || !bookingData.name || !bookingData.event_name) {
+    console.error('⚠️ Booking data is missing essential fields for internal notification.');
+    return res.status(200).send('Missing essential data, message acknowledged.');
   }
 
   let serviceAccountKey;
   try {
     serviceAccountKey = await getServiceAccountKey();
   } catch (error) {
-    console.error('❌ Secret Manager error for user confirmation:', error);
+    console.error('❌ Secret Manager error:', error);
+    // Don't send 500 repeatedly if it's a persistent auth issue.
+    // Pub/Sub will retry, but if the secret is misconfigured,
+    // it might be better to acknowledge after a few tries or use dead-lettering.
+    // For now, a 500 will cause Pub/Sub to retry.
     return res.status(500).send('Secret Manager error');
   }
 
@@ -89,377 +86,366 @@ app.post('/', async (req, res) => {
 
   const {
     name,
-    email, // This will be the recipient
+    email,
     phone,
     event_name: event,
-    event_date: date,
+    event_date: dateRaw,
     number_of_people: attendees,
     special_instructions: notes = 'None',
   } = bookingData;
 
-  // Format the date according to whether year was specified
-  const formattedDate = formatEventDate(date);
+  // Format the date if it's valid
+  const date = formatDateIfValid(dateRaw);
 
-  // --- Email content for the USER ---
-  const userSubject = `Your Bläz Booth Request for ${event} has been Received!`;
-  const from = `=?UTF-8?B?${Buffer.from(SENDER_NAME).toString('base64')}?= <${SENDER_EMAIL}>`;
-  const to = email; // Send to the user who made the booking
+  // Get current date (without time) for the notification timestamp
+  const currentDate = format(new Date(), 'MMM dd, yyyy');
 
-  const userMessageBody = `
+  // Construct the email subject without emojis and with name and event
+  const subject = `Bläz Booking: New Request from ${name} for ${event}`;
+  const from = `=?UTF-8?B?${Buffer.from('Bläz Notifications').toString('base64')}?= <${SENDER_EMAIL}>`;
+  const to = 'arihantjain898@gmail.com'; // Your internal recipient
+
+  // --- ENHANCED PROFESSIONAL EMAIL DESIGN ---
+  const message = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bläz Booth Request Confirmation</title>
+    <title>New Booth Request Notification</title>
     <style type="text/css">
-        /* Base Reset Styles */
-        body, html { margin: 0; padding: 0; -webkit-text-size-adjust: none; -ms-text-size-adjust: none; background-color: #f5f5f5; }
-        table { border-spacing: 0; border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-        table td { border-collapse: collapse; mso-line-height-rule: exactly; }
-        img, a img { border: 0; outline: none; text-decoration: none; height: auto; line-height: 100%; }
-        a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font-size: inherit !important; font-family: inherit !important; font-weight: inherit !important; line-height: inherit !important; }
+        /* Reset styles */
+        body, html { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+        table { border-spacing: 0; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+        td { padding: 0; }
+        img { border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
         
-        /* Base Layout */
-        .main-wrapper { max-width: 600px; width: 100%; margin: 0 auto; background-color: #ffffff; }
-        .container { width: 100%; max-width: 600px; margin: 0 auto; }
-        .full-width-image { width: 100%; max-width: 600px; height: auto; }
-        
-        /* Typography */
+        /* Base styles */
         body, table, td, p, a, li, blockquote { 
-            -webkit-text-size-adjust: 100%; 
-            -ms-text-size-adjust: 100%; 
-            font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            color: #333333; 
+            font-size: 14px; /* Reduced from 16px */
         }
         
-        /* Color Palette */
-        :root {
-            --brand-purple: #8B5CF6;
-            --brand-indigo: #6366F1;
-            --gray-50: #F8F8F8;
-            --gray-100: #E4E4E7;
-            --gray-200: #D4D4D8;
-            --gray-800: #27272A;
-            --gray-900: #18181B;
-            --gray-950: #09090B;
-            --white: #FFFFFF;
-            --black: #000000;
+        /* Container styles */
+        .email-container {
+            max-width: 600px; /* Reduced from 650px */
+            margin: auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
         
-        /* Header Section */
+        /* Header styles */
         .header {
-            background: linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
+            background: linear-gradient(135deg, #0062E6, #33A8FF);
+            padding: 20px; /* Reduced from 30px */
+            text-align: left;
+            color: #ffffff;
         }
-        .header-logo {
-            width: 120px;
-            height: auto;
-            margin-bottom: 20px;
+        
+        .logo-area {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px; /* Reduced from 15px */
         }
+        
+        .logo-circle {
+            width: 35px; /* Reduced from 40px */
+            height: 35px; /* Reduced from 40px */
+            background-color: white;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px; /* Reduced from 15px */
+            font-weight: 700;
+            color: #0062E6;
+            font-size: 16px; /* Reduced from 18px */
+        }
+        
         .header h1 {
             margin: 0;
-            font-size: 30px;
-            font-weight: 800;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            color: white;
+            font-size: 20px; /* Reduced from 24px */
+            font-weight: 600;
+            letter-spacing: 0.5px;
         }
         
-        /* Content Area */
+        .timestamp {
+            font-size: 12px; /* Reduced from 14px */
+            margin-top: 6px; /* Reduced from 8px */
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 400;
+        }
+        
+        /* Content styles */
         .content {
-            padding: 40px 30px;
-            background-color: white;
-            color: #333333;
-        }
-        .greeting {
-            font-size: 20px;
-            font-weight: 600;
-            color: #333333;
-            margin-bottom: 20px;
-        }
-        .paragraph {
-            font-size: 16px;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            color: #4B5563;
-        }
-        .highlight {
-            font-weight: 600;
-            color: #6366F1;
+            padding: 25px; /* Reduced from 35px */
         }
         
-        /* Information Box */
-        .info-box {
-            background-color: #F3F4F6;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 30px 0;
-        }
-        .info-box-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 20px;
-            color: #111827;
+        .intro {
+            font-size: 14px; /* Reduced from 16px */
+            line-height: 1.5; /* Reduced from 1.6 */
+            margin-bottom: 20px; /* Reduced from 25px */
+            color: #333333;
         }
         
-        /* Data Table */
-        .data-table {
+        /* Card styles */
+        .info-card {
+            background-color: #f8fafc;
+            border: 1px solid #e5e9f2;
+            border-left: 4px solid #0062E6;
+            border-radius: 6px;
+            padding: 15px; /* Reduced from 25px */
+            margin-bottom: 20px; /* Reduced from 30px */
+        }
+        
+        .card-title {
+            font-size: 16px; /* Reduced from 18px */
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 15px; /* Reduced from 20px */
+            color: #0062E6;
+        }
+        
+        /* Data grid styles */
+        .data-grid {
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
         }
-        .data-table tr {
-            margin-bottom: 8px;
-        }
-        .data-table th {
-            text-align: left;
-            padding: 12px 15px;
-            background-color: #EEEEF2;
-            color: #4F46E5;
-            font-weight: 600;
-            border-radius: 5px 0 0 5px;
-            width: 40%;
-            vertical-align: top;
-            font-size: 14px;
-        }
-        .data-table td {
-            text-align: left;
-            padding: 12px 15px;
-            background-color: #F8F8FC;
-            color: #1F2937;
-            border-radius: 0 5px 5px 0;
-            vertical-align: top;
-            font-size: 14px;
+        
+        .data-grid tr:not(:last-child) {
+            border-bottom: 1px solid #e5e9f2;
         }
         
-        /* Button Styling */
-        .button-container {
+        .data-grid th, .data-grid td {
+            padding: 8px 12px; /* Reduced from 12px 15px */
+            text-align: left;
+            vertical-align: top;
+        }
+        
+        .data-grid th {
+            width: 120px; /* Reduced from 180px */
+            color: #6c757d;
+            font-weight: 500;
+            background-color: rgba(0, 98, 230, 0.03);
+        }
+        
+        .data-grid td {
+            color: #333333;
+            font-weight: 400;
+        }
+        
+        .highlight {
+            color: #0062E6;
+            font-weight: 500;
+        }
+        
+        .note-section {
+            background-color: #fff9e6;
+            border: 1px solid #ffecb3;
+            border-radius: 6px;
+            padding: 12px; /* Reduced from 15px */
+            margin-top: 20px; /* Reduced from 25px */
+        }
+        
+        .note-title {
+            color: #856404;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 8px; /* Reduced from 10px */
+            font-size: 14px; /* Reduced from 16px */
+        }
+        
+        .note-content {
+            color: #6c584c;
+            font-style: italic;
+            margin: 0;
+        }
+        
+        /* Call to action button */
+        .cta-container {
             text-align: center;
-            margin: 35px 0 25px;
-        }
-        .button {
-            display: inline-block;
-            background: linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%);
-            color: white !important;
-            font-weight: 600;
-            font-size: 16px;
-            padding: 15px 25px;
-            border-radius: 8px;
-            text-decoration: none;
-            box-shadow: 0 4px 6px rgba(139, 92, 246, 0.25);
-            transition: all 0.3s ease;
+            margin: 20px 0; /* Reduced from 30px */
         }
         
-        /* Footer Section */
+        .cta-button {
+            background-color: #0062E6;
+            color: #ffffff !important;
+            padding: 10px 20px; /* Reduced from 12px 24px */
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-block;
+            text-align: center;
+            transition: background-color 0.3s;
+            font-size: 14px; /* Added size */
+        }
+        
+        .cta-button:hover {
+            background-color: #0056CC;
+        }
+        
+        /* Footer styles */
         .footer {
-            background-color: #18181B;
-            color: #A1A1AA;
-            padding: 30px 20px;
+            background-color: #f8fafc;
+            padding: 15px; /* Reduced from 20px */
             text-align: center;
-            font-size: 14px;
+            border-top: 1px solid #e5e9f2;
         }
-        .social-icons {
-            margin: 20px 0;
-        }
-        .social-icons a {
-            display: inline-block;
-            margin: 0 8px;
-        }
-        .social-icon {
-            width: 32px;
-            height: 32px;
-        }
-        .footer-links {
-            margin-bottom: 20px;
-        }
-        .footer-links a {
-            color: #D4D4D8;
-            margin: 0 10px;
-            text-decoration: none;
-        }
+        
         .footer-text {
-            margin: 5px 0;
-            color: #71717A;
-            font-size: 12px;
+            color: #6c757d;
+            font-size: 12px; /* Reduced from 14px */
+            margin: 0;
         }
         
-        /* Divider */
-        .divider {
-            height: 1px;
-            width: 100%;
-            background-color: #E5E7EB;
-            margin: 30px 0;
+        .blaz-tag {
+            font-weight: 600;
+            color: #0062E6;
         }
         
-        /* Responsive Styles */
+        /* Responsive styles */
         @media screen and (max-width: 600px) {
-            .content, .header, .footer {
-                padding: 30px 20px;
+            .header, .content, .footer {
+                padding: 15px !important; /* Further reduced */
             }
-            .data-table th {
-                width: 35%;
-                font-size: 13px;
-            }
-            .data-table td {
-                font-size: 13px;
-            }
-            .header h1 {
-                font-size: 24px;
-            }
-        }
-        
-        @media screen and (max-width: 480px) {
-            .container {
-                width: 100% !important;
-            }
-            .header {
-                padding: 25px 15px;
-            }
-            .content {
-                padding: 25px 15px;
-            }
-            .info-box {
-                padding: 20px 15px;
+            
+            .info-card {
+                padding: 12px !important; /* Further reduced */
             }
             
             /* Modified mobile styles to keep headers and values on same line */
-            .data-table th, .data-table td {
+            .data-grid th, .data-grid td {
                 display: table-cell;
-                padding: 8px 10px;
+                padding: 6px 8px; /* Further reduced */
                 font-size: 12px;
             }
-            .data-table th {
-                width: 40%;
+            
+            .data-grid th {
+                width: 35% !important;
             }
-            .data-table tr {
-                margin-bottom: 5px;
+            
+            .data-grid tr {
+                margin-bottom: 4px;
                 display: table-row;
             }
         }
     </style>
 </head>
 
-<body style="margin:0; padding:0; background-color:#F5F5F5;">
-    <!--[if mso]>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" align="center">
-    <tr>
-    <td>
-    <![endif]-->
+<body style="margin: 0; padding: 0; background-color: #f4f7fa;">
+    <!-- Preview Text -->
+    <div style="display: none; max-height: 0px; overflow: hidden;">
+        New booking request from ${name} for ${event} - Review needed
+    </div>
     
-    <div style="max-width:600px; margin:0 auto;">
-        <!-- Preheader Text (hidden) -->
-        <div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
-            Your Bläz Booth Request for ${event} has been confirmed! Details inside...
-        </div>
-        
-        <!-- Main Email Container -->
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" width="100%" style="max-width:600px; border-collapse:collapse; background-color:#FFFFFF; border-radius:8px; overflow:hidden; margin-top:20px; margin-bottom:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
-            <!-- Header section -->
+    <center style="width: 100%; background-color: #f4f7fa; padding: 20px 0;">
+        <table class="email-container" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px;">
+            <!-- Header -->
             <tr>
-                <td class="header" style="background:linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%); padding:40px 20px; text-align:center; color:white;">
-                    <h1 style="margin:0; font-size:30px; font-weight:800; letter-spacing:1px; text-transform:uppercase; color:white;">BOOKING REQUEST RECEIVED!</h1>
+                <td class="header" style="background: linear-gradient(135deg, #0062E6, #33A8FF); padding: 20px; text-align: left; color: #ffffff;">
+                    <div class="logo-area" style="display: block; margin-bottom: 10px;">
+                        <div class="logo-circle" style="width: 35px; height: 35px; background-color: white; border-radius: 50%; display: inline-block; text-align: center; line-height: 35px; margin-right: 10px; font-weight: 700; color: #0062E6; font-size: 16px;">B</div>
+                        <span style="font-weight: 700; font-size: 18px; vertical-align: middle;">Bläz Entertainment</span>
+                    </div>
+                    <h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">New Booking Request</h1>
+                    <p class="timestamp" style="font-size: 12px; margin-top: 6px; color: rgba(255, 255, 255, 0.9); font-weight: 400;">Received on ${currentDate}</p>
                 </td>
             </tr>
             
-            <!-- Content Section -->
+            <!-- Content -->
             <tr>
-                <td class="content" style="padding:40px 30px; background-color:white; color:#333333;">
-                    <!-- Greeting -->
-                    <p class="greeting" style="font-size:20px; font-weight:600; color:#333333; margin-bottom:20px;">Hello ${name},</p>
-                    
-                    <!-- Main Message -->
-                    <p class="paragraph" style="font-size:16px; line-height:1.6; margin-bottom:20px; color:#4B5563;">
-                        Thank you for your booth request for <span class="highlight" style="font-weight:600; color:#6366F1;">${event}</span>. We're excited to confirm that we've received your booking details!
+                <td class="content" style="padding: 25px; background-color: #ffffff;">
+                    <p class="intro" style="font-size: 14px; line-height: 1.5; margin-bottom: 20px; color: #333333;">
+                        Hello Bläz Team,<br><br>
+                        A new booth booking request has been submitted that requires your attention. Here are the details:
                     </p>
                     
-                    <p class="paragraph" style="font-size:16px; line-height:1.6; margin-bottom:20px; color:#4B5563;">
-                        Our team is reviewing your request and will follow up with you within one business day to finalize all arrangements. Keep an eye on your inbox and phone for updates from our team.
-                    </p>
-                    
-                    <!-- Information Box -->
-                    <div class="info-box" style="background-color:#F3F4F6; padding:25px; border-radius:10px; margin:30px 0;">
-                        <p class="info-box-title" style="font-size:18px; font-weight:600; margin-bottom:20px; color:#111827;">Booth Request Details</p>
+                    <!-- Customer Information Card -->
+                    <div class="info-card" style="background-color: #f8fafc; border: 1px solid #e5e9f2; border-left: 4px solid #0062E6; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
+                        <h3 class="card-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px; color: #0062E6;">Customer Information</h3>
                         
-                        <!-- Data Table -->
-                        <table class="data-table" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse:separate; border-spacing:0 8px;">
+                        <table class="data-grid" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: separate; border-spacing: 0;">
                             <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Event Name</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${event}</td>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03); border-bottom: 1px solid #e5e9f2;">Full Name:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 600; border-bottom: 1px solid #e5e9f2;">${name}</td>
                             </tr>
                             <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Event Date</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${formattedDate}</td>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03); border-bottom: 1px solid #e5e9f2;">Email:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 400; border-bottom: 1px solid #e5e9f2;">
+                                    <a href="mailto:${email}" style="color: #0062E6; text-decoration: none;">${email}</a>
+                                </td>
                             </tr>
                             <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Contact Name</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${name}</td>
-                            </tr>
-                            <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Contact Email</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${email}</td>
-                            </tr>
-                            <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Contact Phone</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${phone}</td>
-                            </tr>
-                            <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Number of Attendees</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px;">${attendees}</td>
-                            </tr>
-                            <tr>
-                                <th style="text-align:left; padding:12px 15px; background-color:#EEEEF2; color:#4F46E5; font-weight:600; border-radius:5px 0 0 5px; width:40%; vertical-align:top; font-size:14px;">Special Instructions</th>
-                                <td style="text-align:left; padding:12px 15px; background-color:#F8F8FC; color:#1F2937; border-radius:0 5px 5px 0; vertical-align:top; font-size:14px; font-style:italic;">${notes}</td>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03);">Phone:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 400;">
+                                    <a href="tel:${phone}" style="color: #0062E6; text-decoration: none;">${phone}</a>
+                                </td>
                             </tr>
                         </table>
                     </div>
                     
-                    <!-- Additional Information -->
-                    <p class="paragraph" style="font-size:16px; line-height:1.6; margin-bottom:20px; color:#4B5563;">
-                        If you have any questions or need to provide additional information, please don't hesitate to contact our team by replying to this email or reaching out via phone.
-                    </p>
+                    <!-- Event Details Card -->
+                    <div class="info-card" style="background-color: #f8fafc; border: 1px solid #e5e9f2; border-left: 4px solid #0062E6; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
+                        <h3 class="card-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px; color: #0062E6;">Event Details</h3>
+                        
+                        <table class="data-grid" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: separate; border-spacing: 0;">
+                            <tr>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03); border-bottom: 1px solid #e5e9f2;">Event Name:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 600; border-bottom: 1px solid #e5e9f2;">${event}</td>
+                            </tr>
+                            <tr>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03); border-bottom: 1px solid #e5e9f2;">Event Date:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 500; border-bottom: 1px solid #e5e9f2;">
+                                    <span class="highlight" style="color: #0062E6; font-weight: 500;">${date}</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th style="padding: 8px 12px; text-align: left; vertical-align: top; width: 120px; color: #6c757d; font-weight: 500; background-color: rgba(0, 98, 230, 0.03);">Attendees:</th>
+                                <td style="padding: 8px 12px; text-align: left; vertical-align: top; color: #333333; font-weight: 400;">${attendees}</td>
+                            </tr>
+                        </table>
+                        
+                        ${notes && notes !== 'None' ? `
+                        <div class="note-section" style="background-color: #fff9e6; border: 1px solid #ffecb3; border-radius: 6px; padding: 12px; margin-top: 20px;">
+                            <h4 class="note-title" style="color: #856404; font-weight: 600; margin-top: 0; margin-bottom: 8px; font-size: 14px;">Special Instructions:</h4>
+                            <p class="note-content" style="color: #6c584c; font-style: italic; margin: 0; font-size: 13px;">${notes}</p>
+                        </div>
+                        ` : ''}
+                    </div>
                     
-                    <!-- CTA Button -->
-                    <div class="button-container" style="text-align:center; margin:35px 0 25px;">
-                        <a href="https://www.blaz.us/" class="button" style="display:inline-block; background:linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%); color:white; font-weight:600; font-size:16px; padding:15px 25px; border-radius:8px; text-decoration:none; box-shadow:0 4px 6px rgba(139,92,246,0.25);">
-                            Visit Our Website
+                    <!-- Call to Action -->
+                    <div class="cta-container" style="text-align: center; margin: 20px 0;">
+                        <a href="https://docs.google.com/spreadsheets/d/1rCPlnoSoqCXVzg0yVzqkPublXpuwEbLYKJQG7mcAed8/edit?gid=0#gid=0" class="cta-button" style="background-color: #0062E6; color: #ffffff !important; padding: 10px 20px; border-radius: 4px; text-decoration: none; font-weight: 600; display: inline-block; text-align: center; font-size: 14px;">
+                            Review In Admin Portal
                         </a>
                     </div>
                     
-                    <!-- Signature -->
-                    <p class="paragraph" style="font-size:16px; line-height:1.6; margin-top:30px; color:#4B5563;">
-                        Get ready for an exceptional event – we're eager to make it happen.
+                    <p style="margin-top: 20px; line-height: 1.5; font-size: 13px;">
+                        Please respond to the customer within 24 hours to confirm the booking or request more information.
                     </p>
                     
-                    <p class="paragraph" style="font-size:16px; line-height:1.6; margin-bottom:10px; color:#4B5563;">
-                        Sincerely,<br>
-                        <span style="font-weight:700; color:#111827;">The Bläz Team</span>
+                    <p style="line-height: 1.5; margin-bottom: 0; font-size: 13px;">
+                        Best regards,<br>
+                        <strong>Bläz Notification System</strong>
                     </p>
                 </td>
             </tr>
             
-            <!-- Footer Section -->
+            <!-- Footer -->
             <tr>
-                <td class="footer" style="background-color:#18181B; color:#A1A1AA; padding:30px 20px; text-align:center; font-size:14px;">
-                    <p class="footer-text" style="margin:5px 0; color:#71717A; font-size:12px;">
-                        This is an automated message from the Bläz Booking System.
-                    </p>
-                    
-                    <p class="footer-text" style="margin:5px 0; color:#71717A; font-size:12px;">
+                <td class="footer" style="background-color: #f8fafc; padding: 15px; text-align: center; border-top: 1px solid #e5e9f2;">
+                    <p class="footer-text" style="color: #6c757d; font-size: 12px; margin: 0;">
+                        This is an automated notification from the <span class="blaz-tag" style="font-weight: 600; color: #0062E6;">Bläz</span> Booking System.<br>
                         &copy; ${new Date().getFullYear()} Bläz Entertainment. All rights reserved.
                     </p>
                 </td>
             </tr>
-            
         </table>
-    </div>
-    
-    <!--[if mso]>
-    </td>
-    </tr>
-    </table>
-    <![endif]-->
+    </center>
 </body>
 </html>
   `;
@@ -467,27 +453,26 @@ app.post('/', async (req, res) => {
   const rawMessage = Buffer.from(
     `Content-Type: text/html; charset="UTF-8"\r\n` +
     `From: ${from}\r\n` +
-    `To: ${to}\r\n` + // User's email address
-    `Reply-To: blaz@gmail.com\r\n` + // Replies will go to blaz@gmail.com
-    `Subject: =?UTF-8?B?${Buffer.from(userSubject).toString('base64')}?=\r\n` +
+    `To: ${to}\r\n` +
+    `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=\r\n` +
     `\r\n` +
-    userMessageBody
+    message
   ).toString('base64url');
 
   try {
     await gmailClient.users.messages.send({
-      userId: 'me', // 'me' refers to the SENDER_EMAIL authenticated
+      userId: 'me',
       requestBody: { raw: rawMessage },
     });
-    console.log(`✅ User confirmation email sent to: ${to} for booking by: ${name}`);
-    res.status(200).send(`User confirmation email sent to: ${to}`);
+    console.log(`✅ Internal HTML email notification sent for booking by: ${name}`);
+    res.status(200).send(`Internal HTML email notification sent for booking by: ${name}`);
   } catch (error) {
-    console.error(`❌ Gmail API error sending to user ${to}:`, error.response ? error.response.data : error.message);
-    res.status(500).send('Failed to send user confirmation email');
+    console.error('❌ Gmail API error:', error.response ? error.response.data : error.message); // Improved error logging
+    res.status(500).send('Failed to send internal HTML email notification');
   }
 });
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`✅ User confirmation email server is listening on port ${PORT}`);
+  console.log(`✅ Server is listening on port ${PORT}`);
 });
